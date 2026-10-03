@@ -23,15 +23,15 @@ Latency is roughly one clip length plus 2-5s of model time.
 # backend (from repo root)
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt   # includes streamlink; ffmpeg must be installed (brew install ffmpeg)
-cp backend/.env.example backend/.env                # then set GEMINI_API_KEY
+cp backend/.env.example backend/.env                # optional: the repo root .env is read too (GEMINI_API_KEY, SUPARADE_*)
 .venv/bin/uvicorn backend.main:app --port 8000
 
-# frontend
-cd frontend && npm install && npm run dev            # http://localhost:5173
+# portal (Next.js, set CORS_ORIGINS=http://localhost:3000 for the detector)
+cd frontend && npm install && npm run dev            # http://localhost:3000
 ```
 
-In the dashboard, either paste a Twitch / YouTube live URL, or click **Webcam**
-or **Screen-share a tab** (tick "share tab audio" so speech is analyzed). A
+On the portal's Videos page, either paste a Twitch / YouTube live URL, or click **Use webcam**
+or **Share a browser tab** (tick "share tab audio" so speech is analyzed). A
 local file path also works in the URL box and is replayed in real time, which
 is handy for demos.
 

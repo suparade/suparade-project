@@ -1,0 +1,12 @@
+# Supabase CLI config. Only Supabase Compute is set up here (see context.md).
+# Don't run `supabase config push`: every unset setting would push its default to the hosted project.
+project_id = "suparade"
+
+[compute.detector]
+runtime = "dockerfile"
+size = "4gb"
+exposure = "public"
+# Sessions live in memory, so more than one instance would split them.
+instances = 1
+source = "backend"
+exclude = [".env", "__pycache__", "logs", "evidence", "events.jsonl", ".chunks", "tests"]

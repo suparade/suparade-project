@@ -1,11 +1,11 @@
 #!/bin/bash
-# One command end to end run: payments API (:8001) + Gemini detector (:8000) + dashboard (:5173),
+# One command end to end run: payments API (:8001) + Gemini detector (:8000) + Next.js portal (:3000),
 # a $0.50 Stripe test tip, then the demo stream with real Gemini analysis and real Stripe payouts.
 #
 #   ./scripts/run_e2e.sh                 Ctrl+C stops everything
 #   ./scripts/run_e2e.sh <video or URL>  analyze something else (file path, Twitch or YouTube live URL)
 #
-# Needs: .env (payments), backend/.env with GEMINI_API_KEY and SUPARADE_CAMPAIGN_ID, Node, ffmpeg
+# Needs: .env with the payments keys, GEMINI_API_KEY and SUPARADE_CAMPAIGN_ID (backend/.env can override), Node, ffmpeg
 # (installed with Homebrew if missing). Logs go to backend/logs/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,7 +18,7 @@ VIDEO="${1:-backend/demo/demo_stream.mp4}"
 step() { printf "\n\033[1m== %s\033[0m\n" "$1"; }
 fail() { printf "\033[31mFAILED: %s\033[0m\n" "$1"; exit 1; }
 free_ports() {
-  for port in 8000 8001 5173; do
+  for port in 8000 8001 3000; do
     pid=$(lsof -ti tcp:$port -sTCP:LISTEN 2>/dev/null || true)
     if [ -n "$pid" ]; then kill $pid 2>/dev/null || true; fi
   done
@@ -34,10 +34,11 @@ wait_for() {
 
 step "1. Checks"
 [ -f .env ] || fail ".env is missing in $ROOT"
-[ -f backend/.env ] || fail "backend/.env is missing (cp backend/.env.example backend/.env)"
-grep -q '^GEMINI_API_KEY=..' backend/.env || fail "GEMINI_API_KEY is empty in backend/.env"
-CAMPAIGN=$(grep '^SUPARADE_CAMPAIGN_ID=' backend/.env | cut -d= -f2 | tr -d '[:space:]')
-[ -n "$CAMPAIGN" ] || fail "SUPARADE_CAMPAIGN_ID is empty in backend/.env"
+# backend/.env wins over the root .env, like in backend/config.py
+setting() { { cat backend/.env .env 2>/dev/null || true; } | grep "^$1=" | head -1 | cut -d= -f2- | tr -d '[:space:]' || true; }
+[ -n "$(setting GEMINI_API_KEY)" ] || fail "GEMINI_API_KEY is empty in .env"
+CAMPAIGN=$(setting SUPARADE_CAMPAIGN_ID)
+[ -n "$CAMPAIGN" ] || fail "SUPARADE_CAMPAIGN_ID is empty in .env"
 command -v npm >/dev/null || fail "Node.js is missing (https://nodejs.org)"
 if ! command -v ffmpeg >/dev/null; then
   command -v brew >/dev/null || fail "ffmpeg is missing and Homebrew is not installed (https://brew.sh)"
@@ -53,7 +54,7 @@ step "2. Python packages"
 pip install -q --disable-pip-version-check -r requirements.txt -r backend/requirements.txt
 echo "ok"
 
-step "3. Freeing ports 8000, 8001, 5173"
+step "3. Freeing ports 8000, 8001, 3000"
 free_ports
 sleep 1
 trap cleanup EXIT INT TERM
@@ -86,6 +87,15 @@ if [ "$BAL" -lt 1000 ]; then
   echo "budget left: $(balance) cents"
 fi
 
+step "5b. Stripe platform balance (every transfer to a streamer is paid from it)"
+AVAIL=$(python -c 'from app.stripe_utils import as_dict, get_stripe
+print(sum(b["amount"] for b in as_dict(get_stripe().Balance.retrieve())["available"] if b["currency"] == "usd"))')
+echo "available: $AVAIL cents"
+if [ "$AVAIL" -lt 1000 ]; then
+  echo "adding 2000 cents of Stripe test funds"
+  python -m scripts.stripe_check --add-test-funds 2000 | grep -E "payment|FAILED" || true
+fi
+
 step "6. Test tip without Gemini (\$0.50 Stripe sandbox transfer to demo-streamer)"
 OUT=$(python -m backend.payments demo-streamer 2>&1 || true)
 echo "$OUT" | grep -E "^(payment|campaign):" || echo "$OUT" | tail -20
@@ -98,17 +108,17 @@ wait_for http://localhost:8000/api/health || fail "detector did not start, see b
 curl -s http://localhost:8000/api/payments
 echo
 
-step "8. Dashboard on :5173"
+step "8. Portal on :3000"
 if [ ! -d frontend/node_modules ]; then (cd frontend && npm install --silent); fi
-(cd frontend && exec npm run dev -- --port 5173 --strictPort) > "$LOGS/dashboard.log" 2>&1 &
-wait_for http://localhost:5173 || fail "dashboard did not start, see backend/logs/dashboard.log"
-open http://localhost:5173 2>/dev/null || true
-echo "ok, http://localhost:5173"
+(cd frontend && exec npm run dev -- --port 3000) > "$LOGS/portal.log" 2>&1 &
+wait_for http://localhost:3000 || fail "portal did not start, see backend/logs/portal.log"
+open http://localhost:3000 2>/dev/null || true
+echo "ok, http://localhost:3000 (tip alert overlay: http://localhost:3000/alert)"
 
 step "9. Watching $VIDEO as demo-streamer (demo mode)"
 sleep 3
 curl -s -X POST http://localhost:8000/api/sessions -H "Content-Type: application/json" \
   -d "{\"source\":\"url\",\"url\":\"$VIDEO\",\"streamer_id\":\"demo-streamer\",\"demo_alerts\":true,\"chat_script\":\"backend/demo/chat_demo.json\"}"
 echo
-printf "\n\033[1mRunning. Watch the dashboard. Ctrl+C stops everything.\033[0m\n\n"
+printf "\n\033[1mRunning. Watch the portal. Ctrl+C stops everything.\033[0m\n\n"
 tail -n 0 -f "$LOGS/detector.log" | grep --line-buffered -E "payments|tip |ERROR|Traceback|session |refused|webhook"

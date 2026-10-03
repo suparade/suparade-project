@@ -14,6 +14,7 @@ client = TestClient(app)
 
 def test_health():
     assert client.get("/health").json() == {"ok": True}
+    assert client.get("/api/health").json() == {"ok": True}  # path as Vercel forwards it
 
 
 def test_agent_routes_require_key():

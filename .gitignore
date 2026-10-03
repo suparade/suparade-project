@@ -13,6 +13,9 @@ __pycache__/
 # Vercel
 .vercel/
 
+# Supabase CLI state
+supabase/.temp/
+
 # Gemini detector runtime output
 backend/.chunks/
 backend/events.jsonl

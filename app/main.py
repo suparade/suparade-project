@@ -4,7 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.routes import agent, campaigns, creators, webhooks
 
-app = FastAPI(title="Suparade backend", version="0.1.0")
+# Vercel serves this app under /api (see the root vercel.json). root_path strips that prefix,
+# and paths without it (plain uvicorn on :8001, tests) still match.
+app = FastAPI(title="Suparade backend", version="0.1.0", root_path="/api")
 
 
 def _origins() -> list:

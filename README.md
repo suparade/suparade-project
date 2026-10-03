@@ -2,41 +2,50 @@
 
 Agentic product placement tipping. Gemini watches a livestream, spots moments where the streamer uses or praises the sponsor's product, a second Gemini pass verifies them, and the streamer gets a real Stripe tip with an on screen message. Brands fund campaign budgets through Link Agent Wallet.
 
-This repo has two parts that run together:
+This repo has three parts that run together:
 
 | Part | Folder | What it does | Runs on |
 | --- | --- | --- | --- |
-| Gemini detector + dashboard | `backend/`, `frontend/` | Cuts the stream into clips, Gemini video understanding, tip policy, verifier, chat reaction, thank you alerts | Laptop or VM (needs ffmpeg), port 8000, dashboard on 5173 |
-| Payments API | `app/`, `supabase/` | Campaign budgets, creators, detections and tips in Supabase, Stripe Connect payouts, Link funding | Vercel, or locally on port 8001 |
+| Gemini detector | `backend/` | Cuts the stream into clips, Gemini video understanding, tip policy, verifier, chat reaction, thank you alerts | Laptop or VM (needs ffmpeg), port 8000 |
+| Payments API | `app/`, `supabase/` | Campaign budgets, creators, detections and tips in Supabase, Stripe Connect payouts, Link funding | Vercel under `/api`, or locally on port 8001 |
+| Brand portal | `frontend/` | Next.js: Mission control (live streams, agent feed, wallet), Videos (add sources, creators' Stripe accounts), `/alert` (on-stream tip alert) | Vercel, or locally on port 3000 |
 
 ```
 stream URL / webcam -> ffmpeg 10s clips -> Gemini (video+audio+chat) -> tip policy -> Gemini verifier
    -> POST /agent/stream-events (payments API) -> Supabase ledger (budget lock) -> Stripe transfer to streamer
-   -> dashboard shows "paid $X via Stripe tr_..." + spoken thank you alert; tips table -> Supabase Realtime pop up
+   -> portal shows "Paid $X" with the tr_... id + spoken thank you alert on /alert; wallet and tip totals from Supabase
 ```
 
 Details on the detector: [backend/README.md](backend/README.md).
 
 ## End to end test (Gemini + Supabase + Stripe)
 
-Needs: Python 3.9+ (3.11+ recommended), ffmpeg (`brew install ffmpeg`), Node 18+, a Gemini API key, and the payments setup below done once (Supabase migrations, Stripe sandbox key, a seeded campaign with a funded budget and an onboarded streamer whose `creators.handle` matches the dashboard's streamer id, `demo-streamer` for the seed).
+Needs: Python 3.9+ (3.11+ recommended), ffmpeg (`brew install ffmpeg`), Node 20+, a Gemini API key, and the payments setup below done once (Supabase migrations, Stripe sandbox key, a seeded campaign with a funded budget and an onboarded streamer whose `creators.handle` matches the creator handle you enter in the portal, `demo-streamer` for the seed).
+
+One `.env` at the repo root serves all three parts (`backend/.env` can override detector settings):
+
+```bash
+cp .env.example .env     # Supabase, Stripe test key, AGENT_API_KEY, GEMINI_API_KEY, SUPARADE_CAMPAIGN_ID
+./scripts/run_e2e.sh     # installs, starts payments :8001 + detector :8000 + portal :3000, replays the demo stream
+```
+
+The script also tops up the campaign budget (dev credit) and the Stripe test balance when they run low, and sends one $0.50 test tip. By hand instead:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r backend/requirements.txt
-cp backend/.env.example backend/.env   # set GEMINI_API_KEY and SUPARADE_CAMPAIGN_ID
 
 # terminal 1: payments API
 set -a; source .env; set +a; uvicorn app.main:app --port 8001
 # terminal 2: Gemini detector
 .venv/bin/uvicorn backend.main:app --port 8000
-# terminal 3: dashboard
-cd frontend && npm install && npm run dev   # http://localhost:5173
+# terminal 3: portal
+cd frontend && npm install && npm run dev   # http://localhost:3000
 ```
 
 1. Check payments without Gemini: `python -m backend.payments demo-streamer` sends one $0.50 tip and prints the Stripe transfer.
-2. In the dashboard, keep streamer id `demo-streamer`, tick **Demo mode**, and add `backend/demo/demo_stream.mp4` (or a Twitch or YouTube live URL, or your webcam).
-3. Watch a flag go `verifying` -> `paying via Stripe` -> `paid $X via Stripe` with the `tr_...` id. The header shows the campaign budget left. Refusals show the reason (`insufficient_budget`, `unknown_streamer`, `creator_not_payable`).
+2. In the portal, open **Videos** and click **Replay the demo clip** (or keep creator `demo-streamer` and add a Twitch or YouTube live URL, a file path, your webcam or a browser tab).
+3. In **Mission control**, watch the card go Deciding -> Sending -> Paid with the `tr_...` id while the wallet goes down. Skips show the reason (cooldown, `insufficient_budget`, `unknown_streamer`, `creator_not_payable`). Open `/alert` for what the streamer sees.
 4. In Supabase the tip is in `tips` (status `paid`), the debit in `wallet_ledger`, and the moment in `detections` (with `category`, `quote` and the full Gemini event in `meta`).
 
 Every 10s clip with enough sponsor screen time also pays a small `sponsor_screen_time` bonus, so keep the campaign funded (dev credit below).
@@ -68,7 +77,7 @@ cp .env.example .env        # fill in the values
 7. **Fund the campaign (sandbox):** set `ALLOW_DEV_FUNDING=1` and `POST /campaigns/{id}/dev-credit` with the agent key. Real funding goes through Checkout and Link.
 8. **Tests:** `pytest` (payments API) and `python -m unittest discover -s backend/tests -t .` (detector).
 
-Deploy on Vercel: `api/index.py` and `vercel.json` are set up, and `.vercelignore` keeps the detector out of the deployment. Add the same env vars in the Vercel project settings, then point the detector's `SUPARADE_API_URL` at the Vercel URL.
+Deploy on Vercel: `vercel.json` uses Vercel Services, so one project serves the portal at `/` and this API at `/api` (`FastAPI(root_path="/api")` strips the prefix). `.vercelignore` keeps the detector out. Add the `.env` values in the Vercel project settings, set `FRONTEND_URL` to the deployed URL, then point the detector's `SUPARADE_API_URL` at `https://<domain>/api` and the portal's `NEXT_PUBLIC_DETECTOR_URL` at wherever the detector runs (it needs `CORS_ORIGINS` to include the portal's URL).
 
 ## Agent API (header `X-Agent-Key: <AGENT_API_KEY>`)
 
@@ -93,7 +102,7 @@ Deploy on Vercel: `api/index.py` and `vercel.json` are set up, and `.vercelignor
 | `POST /creators/{id}/refresh-status` | Sync payout status from Stripe |
 | `POST /campaigns/{id}/fund` | Checkout URL to top up a campaign budget |
 
-Brands, campaigns, detections, tips and the ledger are read directly from Supabase by the frontend (row level security limits brands to their own data; paid tips are public so the pop up works).
+The portal reads the campaign wallet, tips and creators from Supabase on the server with the service role key (`frontend/lib/supabase.ts`; there is no login yet). Row level security is ready for the switch to the publishable key: brands see only their own data, and paid tips are public so the pop up works.
 
 ## Link Agent Wallet notes
 

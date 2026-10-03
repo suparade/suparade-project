@@ -24,8 +24,8 @@ def create_funding_checkout(campaign: dict, amount_cents: int) -> dict:
                 },
             }
         ],
-        success_url=f"{s.frontend_url}/campaigns/{campaign_id}?funded=1",
-        cancel_url=f"{s.frontend_url}/campaigns/{campaign_id}?funded=0",
+        success_url=f"{s.frontend_url}/?funded=1",  # Mission control shows the new wallet balance
+        cancel_url=f"{s.frontend_url}/?funded=0",
         metadata={"purpose": "campaign_funding", "campaign_id": campaign_id},
         payment_intent_data={"transfer_group": f"campaign_{campaign_id}"},
     )
