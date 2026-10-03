@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import require_agent
 from app.db import get_supabase
-from app.schemas import DetectionIn, StreamEventIn, TipIn, VideoIn, VideoStatusIn
+from app.schemas import DetectionIn, FundIn, StreamEventIn, TipIn, VideoIn, VideoStatusIn
+from app.services.funding import create_funding_checkout
 from app.services.stream_events import StreamEventError, handle_stream_event
 from app.services.tips import TipError, reserve_tip, settle_tip
 
@@ -46,6 +47,18 @@ def campaign_context(campaign_id: UUID):
         "balance_cents": bal[0]["balance_cents"] if bal else 0,
         "recent_tips": recent,
     }
+
+
+@router.post("/campaigns/{campaign_id}/fund")
+def fund_campaign(campaign_id: UUID, body: FundIn):
+    """The brand's agent asks for a Checkout URL to top up the budget (portal "Fund with Link", Link Agent Wallet).
+
+    Creating the link moves no money: the budget is credited only when Stripe reports the payment to the webhook.
+    """
+    camp = get_supabase().table("campaigns").select("id,name,currency").eq("id", str(campaign_id)).limit(1).execute().data
+    if not camp:
+        raise HTTPException(404, "campaign_not_found")
+    return create_funding_checkout(camp[0], body.amount_cents)
 
 
 @router.post("/videos", status_code=201)

@@ -16,7 +16,7 @@ from typing import Optional
 
 from google.genai import types
 
-from . import config
+from . import config, payments
 from .evidence import path_for
 from .gemini_analyzer import client
 from .models import BeverageEvent
@@ -35,11 +35,15 @@ def _dollars(cents: int) -> str:
 async def write_message(event: BeverageEvent) -> str:
     facts = (f"Amount: {_dollars(event.suggested_tip_cents)}\nWhat happened: {event.description}\n"
              f"Quote: {event.quote or 'none'}\nChat reaction: {event.reaction_summary or 'unknown'}")
+    system = MESSAGE_PROMPT.format(brand=config.SPONSOR_BRAND)
+    # The brand's "How to tip" guidance from the portal's Settings page (campaigns.tipper_instructions).
+    guidance = (await payments.campaign_status()).get("tipper_instructions")
+    if guidance:
+        system += f"\n\nThe brand's tipping guidance; follow what applies to the wording (the rules above still apply):\n{guidance[:1000]}"
     resp = await client().aio.models.generate_content(
         model=config.GEMINI_TEXT_MODEL,
         contents=facts,
-        config=types.GenerateContentConfig(
-            system_instruction=MESSAGE_PROMPT.format(brand=config.SPONSOR_BRAND), temperature=0.9),
+        config=types.GenerateContentConfig(system_instruction=system, temperature=0.9),
     )
     text = (resp.text or "").strip().strip('"')
     return text or f"{config.SPONSOR_BRAND} just tipped you {_dollars(event.suggested_tip_cents)}!"

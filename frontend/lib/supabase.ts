@@ -5,16 +5,20 @@ import "server-only";
 // ponytail: no login yet, so every visitor sees this campaign. Move to the publishable key + RLS once brands sign in.
 import type { TipEvent } from "./detector";
 
-async function rest<T>(path: string): Promise<T> {
+async function rest<T>(path: string, init?: { method: string; body: string }): Promise<T> {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the repo root .env");
-  const r = await fetch(`${url}/rest/v1/${path}`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" });
+  const r = await fetch(`${url}/rest/v1/${path}`, {
+    ...init,
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", Prefer: "return=representation" },
+    cache: "no-store",
+  });
   if (!r.ok) throw new Error(`Supabase ${r.status} on ${path.split("?")[0]}: ${await r.text()}`);
   return r.json();
 }
 
-function campaignId() {
+export function campaignId() {
   const id = process.env.SUPARADE_CAMPAIGN_ID;
   if (!id) throw new Error("Set SUPARADE_CAMPAIGN_ID in the repo root .env");
   return id;
@@ -25,6 +29,8 @@ export type Summary = {
   balance: number;
   funded: number;
   maxTip: number;
+  /** campaigns.tipper_instructions, the "How to tip" guidance the tipper writes its messages with. */
+  guidance: string;
   tips: number;
   tipped: number;
   creatorsPaid: number;
@@ -73,7 +79,9 @@ function toEvent(t: TipRow): TipEvent {
 export async function missionData(): Promise<{ summary: Summary; history: TipEvent[] }> {
   const id = campaignId();
   const [campaigns, ledger, tips, creators, recent] = await Promise.all([
-    rest<{ max_tip_cents: number; brands: { name: string } | null }[]>(`campaigns?select=max_tip_cents,brands(name)&id=eq.${id}`),
+    rest<{ max_tip_cents: number; tipper_instructions: string; brands: { name: string } | null }[]>(
+      `campaigns?select=max_tip_cents,tipper_instructions,brands(name)&id=eq.${id}`,
+    ),
     rest<{ kind: string; amount_cents: number }[]>(`wallet_ledger?select=kind,amount_cents&campaign_id=eq.${id}`),
     rest<{ amount_cents: number; creator_id: string }[]>(`tips?select=amount_cents,creator_id&status=eq.paid&campaign_id=eq.${id}`),
     rest<{ id: string }[]>("creators?select=id"),
@@ -91,6 +99,7 @@ export async function missionData(): Promise<{ summary: Summary; history: TipEve
       balance: sum(ledger),
       funded: sum(ledger.filter((l) => l.kind === "funding")),
       maxTip: campaigns[0].max_tip_cents,
+      guidance: campaigns[0].tipper_instructions,
       tips: tips.length,
       tipped: sum(tips),
       creatorsPaid: new Set(tips.map((t) => t.creator_id)).size,
@@ -119,4 +128,10 @@ export async function creatorsData(): Promise<Creator[]> {
     const mine = tips.filter((t) => t.creator_id === c.id);
     return { ...c, tips: mine.length, tipped: mine.reduce((n, t) => n + t.amount_cents, 0) };
   });
+}
+
+/** Settings page: the campaign fields the agents read (the payments API caps tips at max_tip_cents, the tipper writes with the guidance). */
+export async function updateCampaign(fields: { max_tip_cents: number; tipper_instructions: string }) {
+  const rows = await rest<unknown[]>(`campaigns?id=eq.${campaignId()}`, { method: "PATCH", body: JSON.stringify(fields) });
+  if (!rows.length) throw new Error("Campaign not found in Supabase");
 }

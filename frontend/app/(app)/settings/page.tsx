@@ -1,6 +1,8 @@
-"use client";
-
 import Link from "next/link";
+import { connection } from "next/server";
+import { money } from "@/lib/format";
+import { missionData } from "@/lib/supabase";
+import { fundWallet, saveSettings } from "./actions";
 
 const MOMENTS = [
   { value: "sports_drink_mention", label: "Sports drink mention", hint: "The brand is said out loud or read from chat", on: true },
@@ -34,17 +36,29 @@ const legend = "mb-3.5 p-0 text-[15px] font-semibold";
 const fieldset = "m-0 flex flex-col gap-3.5 border-0 border-b border-white/8 p-0 pb-7";
 const label = "text-[13px] text-dim";
 
-function Field({ id, name, text, value, mono }: { id: string; name: string; text: string; value: string; mono?: boolean }) {
+function Field({ id, name, text, value, mono, readOnly }: { id: string; name: string; text: string; value: string; mono?: boolean; readOnly?: boolean }) {
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className={label}>{text}</label>
-      <input id={id} name={name} defaultValue={value} className={mono ? "num" : undefined} />
+      <input id={id} name={name} defaultValue={value} readOnly={readOnly} className={mono ? "num" : undefined} />
     </div>
   );
 }
 
-// ponytail: the form persists nothing yet; it saves to Supabase (shared memory) once the backend lands.
-export default function Settings() {
+const NOTICE: Record<string, string> = {
+  saved: "Saved. The payments API caps the next tip at the new max, and the tipper writes its next message with the new guidance.",
+  maxtip: "The max tip must be between $0.01 and $100.",
+  fund: "Fund between $1 and $5,000.",
+};
+
+// Max tip, guidance and the wallet are the campaign in Supabase. Moments, cooldown and confidence are still the
+// detector's own settings (backend/config.py), and shared memory isn't built yet, so those stay sample data.
+export default async function Settings({ searchParams }: PageProps<"/settings">) {
+  await connection();
+  const { saved, error } = await searchParams;
+  const notice = NOTICE[saved ? "saved" : String(error ?? "")];
+  const data = await missionData().catch((e: Error) => e);
+  const c = data instanceof Error ? null : data.summary;
   return (
     <main className="min-w-0 flex-[999_1_560px]">
       <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-8 px-6 pt-10 pb-16">
@@ -54,11 +68,11 @@ export default function Settings() {
         </div>
 
         <div className="flex flex-wrap items-start gap-x-12 gap-y-8">
-          <form id="brief" onSubmit={(e) => e.preventDefault()} className="glass flex min-w-0 flex-[3_1_480px] flex-col gap-7 rounded-[10px] border border-white/10 bg-white/[.045] p-7">
+          <form id="brief" action={saveSettings} className="glass flex min-w-0 flex-[3_1_480px] flex-col gap-7 rounded-[10px] border border-white/10 bg-white/[.045] p-7">
             <fieldset className={fieldset}>
               <legend className={legend}>Brand</legend>
               <div className="grid grid-cols-[repeat(auto-fit,minmax(min(220px,100%),1fr))] gap-3">
-                <Field id="brand" name="brand" text="Brand name" value="Gatorade" />
+                <Field id="brand" name="brand" text="Brand name" value={c?.brand || "Gatorade"} readOnly />
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="bcolor" className={label}>Brand color</label>
                   <div className="flex items-center gap-2">
@@ -93,14 +107,14 @@ export default function Settings() {
               <div className="grid grid-cols-[repeat(auto-fit,minmax(min(180px,100%),1fr))] gap-3">
                 <Field id="cool" name="cooldown" text="Cooldown per creator" value="30 s of stream time" />
                 <Field id="conf" name="confidence" text="Minimum confidence" value="0.60" />
-                <Field id="maxtip" name="maxtip" text="Max tip per moment" value="$10.00" />
+                <Field id="maxtip" name="maxtip" text="Max tip per moment" value={money(c?.maxTip ?? 1000)} mono />
               </div>
             </fieldset>
 
             <fieldset className={`${fieldset} gap-1.5`}>
               <legend className="mb-2 p-0 text-[15px] font-semibold">How to tip</legend>
               <label htmlFor="guide" className={label}>Guidance for the tipper, in plain words</label>
-              <textarea id="guide" name="guidance" rows={4} defaultValue={GUIDANCE} />
+              <textarea id="guide" name="guidance" rows={4} maxLength={1000} defaultValue={c?.guidance || GUIDANCE} />
             </fieldset>
 
             <fieldset className="m-0 flex flex-col gap-3.5 border-0 p-0">
@@ -110,7 +124,7 @@ export default function Settings() {
                   <label htmlFor="fund" className={label}>Amount to fund</label>
                   <input id="fund" name="fund" defaultValue="$500.00" className="num" />
                 </div>
-                <button type="button" className="btn-ghost h-10 px-4 text-sm font-semibold">Fund with Link</button>
+                <button type="submit" formAction={fundWallet} className="btn-ghost h-10 px-4 text-sm font-semibold">Fund with Link</button>
                 <a href="https://dashboard.stripe.com/acct_1UMRhZ4OXYqp8il9/test/payments" target="_blank" rel="noopener" className="inline-flex h-10 items-center gap-1.5 text-[13px] font-medium text-dim no-underline">
                   Stripe dashboard
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 2.5H2.5v7h7V7" /><path d="M7 2h3v3M10 2L5.5 6.5" /></svg>
@@ -142,8 +156,15 @@ export default function Settings() {
               </dl>
               <p className="m-0 text-xs leading-normal text-mute">Found with Exa: three during onboarding, one today when the tipper met a TikTok cooking live for the first time.</p>
             </div>
-            <p className="m-0 border-t border-white/8 pt-3.5 text-[13px] text-dim">Wallet: <span className="num text-ink">$500.00</span> funded, <span className="num text-ink">$58.50</span> spent.</p>
+            <p className="m-0 border-t border-white/8 pt-3.5 text-[13px] text-dim">
+              {c ? (
+                <>Wallet: <span className="num text-ink">{money(c.funded)}</span> funded, <span className="num text-ink">{money(c.tipped)}</span> spent, <span className="num text-ink">{money(c.balance)}</span> left.</>
+              ) : (
+                <>Couldn&apos;t read the campaign from Supabase: {(data as Error).message}</>
+              )}
+            </p>
             <button type="submit" form="brief" className="btn-primary h-12 text-[15px]">Save changes</button>
+            {notice && <p role="status" className="m-0 text-[13px] leading-normal text-ink">{notice}</p>}
             <p className="m-0 text-[13px] leading-normal text-mute">Changes reach the scouts on their next clip and the tipper on its next decision. Pausing the wallet stops payouts instantly; the scouts keep watching.</p>
           </aside>
         </div>

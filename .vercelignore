@@ -1,5 +1,5 @@
 # Vercel deploys the Next.js portal (frontend/) and the payments API (app/), see vercel.json.
-# The Gemini detector needs ffmpeg and long running workers, so it runs on a laptop or a VM.
+# The Gemini detector needs ffmpeg and long running workers, so it runs on Supabase Compute (scripts/deploy_detector.sh).
 backend/
 # Secrets come from the Vercel project's env vars; the CLI would otherwise upload the local .env
 .env

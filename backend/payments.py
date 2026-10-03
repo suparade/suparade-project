@@ -155,6 +155,7 @@ async def campaign_status(max_age_seconds: float = 10) -> dict[str, Any]:
         "balance_cents": c.get("balance_cents"),
         "max_tip_cents": c.get("max_tip_cents"),
         "currency": c.get("currency"),
+        "tipper_instructions": c.get("tipper_instructions"),  # "How to tip" on the portal's Settings page
     }
     _campaign_cache.update(at=now, data=data)
     return data

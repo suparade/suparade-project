@@ -1,11 +1,13 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import type { Found } from "./streams/route";
 
-// ponytail: the brand agent and search agent are simulated with timers; swap for backend calls once they exist.
+// ponytail: the brand agent is simulated with timers; swap for a backend call once it exists.
+// The search agent is real (./streams/route.ts). `fits` are Twitch categories.
 const BRANDS = [
-  { id: "gatorade", name: "Gatorade", short: "Gatorade", kind: "Sports drink", color: "#FF7A1A", product: "bottle",
+  { id: "gatorade", name: "Gatorade", short: "Gatorade", kind: "Sports drink", color: "#FF7A1A", product: "bottle", fits: ["Fitness & Health", "Sports", "NBA 2K27"],
     profile: [
       ["Product", "Sports drink in 20 oz and 28 oz bottles, plus Gatorade Zero and G2."],
       ["Looks like", "Orange bolt logo and the Gatorade wordmark, coloured drink visible through the bottle."],
@@ -14,7 +16,7 @@ const BRANDS = [
       ["Voice", "Short and upbeat. Signs off “Stay hydrated.”"],
       ["Never pay for", "Competitor bottles in frame (Powerade, Prime, BodyArmor), alcohol, creators under 18."],
     ] },
-  { id: "northline", name: "Northline Cold Brew", short: "Northline", kind: "Canned cold brew coffee", color: "#C6F432", product: "can",
+  { id: "northline", name: "Northline Cold Brew", short: "Northline", kind: "Canned cold brew coffee", color: "#C6F432", product: "can", fits: ["Co-working & Studying", "Food & Drink", "Just Chatting"],
     profile: [
       ["Product", "Cold brew coffee in a slim 250 ml can, black or oat."],
       ["Looks like", "Matte black can, lime horizon line, lowercase wordmark."],
@@ -23,7 +25,7 @@ const BRANDS = [
       ["Voice", "Dry and calm. Signs off “Steady on.”"],
       ["Never pay for", "Other coffee brands in frame, energy drinks, creators under 18."],
     ] },
-  { id: "fernway", name: "Fernway Sparkling", short: "Fernway", kind: "Sparkling mineral water", color: "#4DA3FF", product: "can",
+  { id: "fernway", name: "Fernway Sparkling", short: "Fernway", kind: "Sparkling mineral water", color: "#4DA3FF", product: "can", fits: ["Travel & Outdoors", "Food & Drink", "Just Chatting"],
     profile: [
       ["Product", "Sparkling mineral water in a 330 ml can, three flavours."],
       ["Looks like", "Pale blue can, line-drawn fern, FERNWAY in tall capitals."],
@@ -44,8 +46,6 @@ const TASKS = [
   ["Researched market rates", "Exa search: what brands pay creators per mention and per placement. Saved to shared memory"],
 ];
 
-const CHECKED = 214;
-
 const h1 = "m-0 text-[40px] leading-[1.08] font-bold tracking-[-0.01em] font-stretch-78%";
 const lead = "m-0 text-base leading-normal text-dim";
 const footer = "flex flex-wrap justify-between gap-3 border-t border-white/8 pt-5";
@@ -63,25 +63,39 @@ export default function Onboarding() {
   const [learnDone, setLearnDone] = useState(0);
   const [correcting, setCorrecting] = useState(false);
   const [off, setOff] = useState<Record<string, boolean>>({ water: true, talk: true });
-  const [foundN, setFoundN] = useState(0);
+  const [search, setSearch] = useState<{ streams: Found[]; checked: number; failed: string[]; error?: string } | null>(null);
   const [dropped, setDropped] = useState<Record<string, boolean>>({});
+  const [launching, setLaunching] = useState(false);
+  const [launchErr, setLaunchErr] = useState("");
+  const router = useRouter();
 
   const goTo = (n: number) => {
     setStep(n);
     setCorrecting(false);
     setLearnDone(0);
-    setFoundN(0);
+    setSearch(null);
+    setLaunchErr("");
   };
 
-  // Step 2: the brand agent ticks off one task every 1.3 s. Step 4: the search agent finds a stream every 0.65 s.
+  const b = BRANDS.find((x) => x.id === brandId)!;
+
+  // Step 2: the brand agent ticks off one task every 1.3 s. Step 4: the search agent looks for live streams.
   useEffect(() => {
     const ids: ReturnType<typeof setTimeout>[] = [];
     if (step === 2) for (let k = 1; k <= TASKS.length; k++) ids.push(setTimeout(() => setLearnDone(k), k * 1300));
-    if (step === 4) for (let k = 1; k <= 6; k++) ids.push(setTimeout(() => setFoundN(k), 500 + k * 650));
-    return () => ids.forEach(clearTimeout);
-  }, [step]);
-
-  const b = BRANDS.find((x) => x.id === brandId)!;
+    let live = true;
+    if (step === 4) {
+      const q = new URLSearchParams([["brand", b.short], ...b.fits.map((f) => ["fit", f])]);
+      fetch(`/onboarding/streams?${q}`)
+        .then(async (r) => ({ ...(await r.json()), ...(r.ok ? {} : { streams: [], checked: 0, failed: [] }) }))
+        .catch((e: Error) => ({ streams: [], checked: 0, failed: [], error: e.message }))
+        .then((s) => live && setSearch(s));
+    }
+    return () => {
+      live = false;
+      ids.forEach(clearTimeout);
+    };
+  }, [step, b]);
   const learned = learnDone >= TASKS.length;
   const back = () => goTo(Math.max(1, step - 1));
 
@@ -92,19 +106,30 @@ export default function Onboarding() {
     { id: "water", label: "Any hydration moment", hint: "Drinking water, no brand needed" },
     { id: "talk", label: "Talks about drinks", hint: "Drink talk without the brand" },
   ];
-  const streams = [
-    { handle: "kaimplays", where: "Twitch · live · 2.4k watching", why: `Drinks on camera between rounds. Chat asked about ${b.short} last week.`, fit: "0.94" },
-    { handle: "pixelpatty", where: "Twitch · live · 5.1k watching", why: `Reads chat on air. ${b.short} came up twice in the last month.`, fit: "0.91" },
-    { handle: "gymwithjules", where: "YouTube · video · 24:10", why: "Fitness channel. A drink is in frame for most of every set.", fit: "0.89" },
-    { handle: "nova.runs", where: "YouTube · video · 41:10", why: "Long-run vlogs with drink stops on camera.", fit: "0.86" },
-    { handle: "dj_marrow", where: "Twitch · live · 1.2k watching", why: "A drink sits on the booth in the wide shot every set.", fit: "0.74" },
-    { handle: "theo_cooks", where: "TikTok · live · 860 watching", why: "Cooking streams. Drinks stay on the counter in view.", fit: "0.71" },
-  ];
-  const found = streams.slice(0, foundN);
-  const kept = found.filter((r) => !dropped[r.handle]).length;
-  const searched = foundN >= streams.length;
-  const canLaunch = searched && kept > 0;
-  const launchTxt = !searched ? "Searching…" : kept === 0 ? "Keep at least one stream" : `Start ${kept} ${kept === 1 ? "scout" : "scouts"}`;
+  const found = search?.streams ?? [];
+  const keep = found.filter((r) => !dropped[r.url]);
+  const kept = keep.length;
+  const searched = search !== null;
+  const canLaunch = searched && kept > 0 && !launching;
+  const launchTxt = !searched ? "Searching…" : launching ? "Starting…" : kept === 0 ? "Keep at least one stream" : `Start ${kept} ${kept === 1 ? "scout" : "scouts"}`;
+
+  // One detector session per kept stream, through the portal's key route. They show up in Videos.
+  const launch = async () => {
+    setLaunching(true);
+    setLaunchErr("");
+    const started = await Promise.allSettled(
+      keep.map(async (r) => {
+        const res = await fetch("/detector/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "url", url: r.url, streamer_id: r.handle }) });
+        if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `Detector answered ${res.status}`);
+      }),
+    );
+    if (started.every((s) => s.status === "rejected")) {
+      setLaunchErr((started[0] as PromiseRejectedResult).reason.message);
+      setLaunching(false);
+      return;
+    }
+    router.push("/videos");
+  };
 
   return (
     <div className="ambient flex min-h-screen flex-col" style={{ "--accent": b.color } as React.CSSProperties}>
@@ -281,28 +306,35 @@ export default function Onboarding() {
           <>
             <div className="flex flex-col gap-2.5">
               <h1 className={h1}>Finding streams where {b.short} fits</h1>
-              <p className={lead}>The search agent looks for live streams and recent videos where {b.short} already comes up or would fit naturally. Every stream you keep gets its own scout.</p>
+              <p className={lead}>The search agent looks for live streams on Twitch and YouTube where {b.short} already comes up or would fit naturally. Every stream you keep gets its own scout.</p>
             </div>
 
             <div role="status" className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/5 px-3.5 py-3 text-[13px] text-dim">
-              {searched ? <Tick /> : <span className="spin" aria-hidden="true" />}
+              {!searched ? <span className="spin" aria-hidden="true" /> : !search.error && <Tick />}
               <span>
-                {searched
-                  ? `Checked ${CHECKED} streams on Twitch, YouTube and TikTok. ${streams.length} are a good fit.`
-                  : `Searching Twitch, YouTube and TikTok · ${Math.round((CHECKED * foundN) / streams.length)} streams checked`}
+                {!searched
+                  ? "Searching live streams on Twitch and YouTube…"
+                  : search.error
+                    ? `The search failed: ${search.error}`
+                    : `Found ${search.checked} live streams on Twitch and YouTube. ${found.length ? `${found.length} are a good fit.` : "None fit right now; try again later."}${search.failed.length ? ` ${search.failed.join(" and ")} didn't answer.` : ""}`}
               </span>
             </div>
 
             <ul aria-label="Streams found" className="m-0 flex list-none flex-col border-t border-white/8 p-0">
               {found.map((r) => (
-                <li key={r.handle} className="rise border-b border-white/8">
+                <li key={r.url} className="rise border-b border-white/8">
                   <label className="check -mx-3 grid cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3.5 rounded-md p-3">
-                    <input type="checkbox" name="streams" value={r.handle} checked={!dropped[r.handle]} onChange={() => setDropped((d) => ({ ...d, [r.handle]: !d[r.handle] }))} />
+                    <input type="checkbox" name="streams" value={r.url} checked={!dropped[r.url]} onChange={() => setDropped((d) => ({ ...d, [r.url]: !d[r.url] }))} />
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="flex flex-wrap items-baseline gap-2"><span className="text-[15px] font-semibold">@{r.handle}</span><span className="text-xs text-mute">{r.where}</span></span>
-                      <span className="text-[13px] leading-[1.45] text-dim">{r.why}</span>
+                      <span className="flex flex-wrap items-baseline gap-2">
+                        <span className="text-[15px] font-semibold">@{r.handle}</span>
+                        <span className="text-xs text-mute">{r.platform} · live · <span className="num">{r.viewers.toLocaleString("en-US")}</span> watching</span>
+                      </span>
+                      <span className="line-clamp-2 text-[13px] leading-[1.45] text-dim">
+                        {r.mentions ? `Says ${b.short} in the title` : `Live in ${r.topic}`}{r.title ? `: “${r.title}”` : "."}
+                      </span>
                     </span>
-                    <span className="text-xs text-mute">fit <span className="num text-ink">{r.fit}</span></span>
+                    <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center px-2 text-xs text-dim hover:text-ink">Watch</a>
                   </label>
                 </li>
               ))}
@@ -312,8 +344,9 @@ export default function Onboarding() {
               <button type="button" onClick={back} className={ghost}>Back</button>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
                 <span className="text-[13px] text-mute">Agents act on their own once started. Tips go to each creator&apos;s Stripe account, set up in Videos.</span>
-                {canLaunch ? <Link href="/" className={primary}>{launchTxt}</Link> : <button type="button" disabled className={primary}>{launchTxt}</button>}
+                <button type="button" onClick={() => void launch()} disabled={!canLaunch} className={primary}>{launchTxt}</button>
               </div>
+              {launchErr && <p role="alert" className="m-0 w-full text-[13px] text-live">Couldn&apos;t start the scouts: {launchErr}</p>}
             </div>
           </>
         )}

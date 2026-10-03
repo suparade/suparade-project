@@ -13,7 +13,7 @@ from app.services.connect import create_onboarding_link
 def main(video_url: str) -> None:
     sb = get_supabase()
 
-    brand = sb.table("brands").insert({"name": "Demo Sports Drink"}).execute().data[0]
+    brand = sb.table("brands").insert({"name": "Gatorade"}).execute().data[0]
     campaign = (
         sb.table("campaigns")
         .insert(

@@ -13,9 +13,11 @@ OUT=backend/.env.compute
 grep -q '^GEMINI_API_KEY=..' .env || { echo "GEMINI_API_KEY is empty in .env"; exit 1; }
 KEY=$(grep -m1 '^DETECTOR_KEY=' "$OUT" 2>/dev/null | cut -d= -f2- || true)
 {
-  grep -E '^(GEMINI_API_KEY|SUPARADE_CAMPAIGN_ID|AGENT_API_KEY|CORS_ORIGINS)=' .env || true
-  # localhost can't be reached from the container; without a URL the detector simulates tips
-  grep -E '^SUPARADE_API_URL=https://' .env || true
+  grep -E '^(GEMINI_API_KEY|SUPARADE_CAMPAIGN_ID|AGENT_API_KEY)=' .env || true
+  # The deployed detector pays through the deployed payments API and serves the deployed portal (and a local one).
+  # The root .env keeps localhost for run_e2e.sh.
+  echo "SUPARADE_API_URL=https://suparade.vercel.app/api"
+  echo "CORS_ORIGINS=https://suparade.vercel.app,http://localhost:3000"
   echo "DETECTOR_KEY=${KEY:-$(openssl rand -hex 24)}"
 } > "$OUT.tmp"
 mv "$OUT.tmp" "$OUT"

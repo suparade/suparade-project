@@ -110,3 +110,17 @@ class SimulatedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AlertGuidanceTest(unittest.TestCase):
+    def test_settings_guidance_reaches_the_message_prompt(self):
+        from backend import alerts
+
+        gen = mock.AsyncMock(return_value=mock.Mock(text="Gatorade tipped $3!"))
+        fake = mock.Mock()
+        fake.aio.models.generate_content = gen
+        status = mock.AsyncMock(return_value={"ok": True, "tipper_instructions": "Sign every message Stay hydrated."})
+        with mock.patch.object(alerts, "client", return_value=fake), \
+                mock.patch.object(alerts.payments, "campaign_status", status):
+            self.assertEqual(run(alerts.write_message(event())), "Gatorade tipped $3!")
+        self.assertIn("Sign every message Stay hydrated.", gen.call_args.kwargs["config"].system_instruction)

@@ -197,3 +197,18 @@ def test_transfer_description_carries_the_reason(monkeypatch):
     sb.db["detections"][0].update(meta={}, category=None, brand=None)
     tip["reasoning"] = "Clear on camera use, worth the max."
     assert tips_service.transfer_details(tip)["description"] == "Tip to demo-streamer: Clear on camera use, worth the max."
+
+
+def test_agent_fund_returns_checkout_for_known_campaign(monkeypatch):
+    from app.routes import agent
+
+    sb = FakeSupabase()
+    sb.db["campaigns"] = [{"id": CAMPAIGN, "name": "Demo", "currency": "usd"}]
+    monkeypatch.setattr(agent, "get_supabase", lambda: sb)
+    monkeypatch.setattr(agent, "create_funding_checkout", lambda c, cents: {"checkout_url": f"https://pay/{c['id']}/{cents}"})
+    url = f"/agent/campaigns/{CAMPAIGN}/fund"
+    assert client.post(url, json={"amount_cents": 500}).status_code == 401
+    r = client.post(url, headers=H, json={"amount_cents": 500})
+    assert r.json() == {"checkout_url": f"https://pay/{CAMPAIGN}/500"}
+    assert client.post(f"/agent/campaigns/{uuid.uuid4()}/fund", headers=H, json={"amount_cents": 500}).status_code == 404
+    assert client.post(url, headers=H, json={"amount_cents": 0}).status_code == 422
