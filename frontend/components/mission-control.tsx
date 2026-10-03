@@ -129,7 +129,8 @@ export function MissionControl({ summary, history, error }: { summary: Summary |
         </section>
       </main>
 
-      <aside aria-label="Agent feed" className="glass sticky top-4 m-4 flex max-h-[calc(100vh-32px)] min-w-0 flex-[1_1_360px] flex-col self-start overflow-hidden rounded-2xl border border-white/10 bg-[rgba(12,14,18,0.5)] shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_24px_48px_-16px_rgba(0,0,0,0.6)]">
+      {/* No drop shadow: Chrome counts it as covering the stream tiles beside it, and Twitch then won't autoplay them. */}
+      <aside aria-label="Agent feed" className="glass sticky top-4 m-4 flex max-h-[calc(100vh-32px)] min-w-0 flex-[1_1_360px] flex-col self-start overflow-hidden rounded-2xl border border-white/10 bg-[rgba(12,14,18,0.5)]">
         <div className="flex flex-col gap-2.5 border-b border-white/8 px-5 pt-4.5 pb-3.5">
           <div className="flex items-center justify-between gap-2">
             <h2 className="m-0 text-[15px] font-semibold">Agent feed</h2>
@@ -240,6 +241,19 @@ export function LiveVideo({ stream }: { stream: MediaStream }) {
   );
 }
 
+/** The platform's own muted player for a Twitch or YouTube URL. Sessions only exist in the browser, so `location` is safe. */
+function embedUrl(url: string | null) {
+  const u = URL.parse(url ?? "");
+  if (!u) return null;
+  const host = u.hostname.replace(/^(www|m)\./, "");
+  if (host === "twitch.tv") {
+    const channel = u.pathname.split("/")[1];
+    return channel && `https://player.twitch.tv/?channel=${channel}&parent=${location.hostname}&muted=true`;
+  }
+  const yt = host === "youtu.be" ? u.pathname.slice(1) : host === "youtube.com" ? u.searchParams.get("v") ?? u.pathname.match(/^\/live\/([\w-]+)/)?.[1] : null;
+  return yt && `https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&playsinline=1`;
+}
+
 /** What a tile shows behind its labels: this tab's webcam, the replayed file, or the latest evidence frame. */
 export function StreamMedia({ s, stream, poster }: { s: Session; stream?: MediaStream; poster?: string }) {
   if (stream) return <LiveVideo stream={stream} />;
@@ -261,48 +275,79 @@ function StreamTile(p: { s: Session; scout: string; now: number; events: TipEven
   const chip = state === "seen" ? `Seen · ${categoryLabel(latest.category)}` : state === "paid" ? `Paid ${money(latest.suggested_tip_cents)}` : "Skipped";
   const last = p.chunks.at(-1)?.status;
   const frost = "frost rounded bg-[rgba(12,14,18,0.5)] px-[7px] py-[3px] text-[11px]";
+  const elapsed = now && !s.source_exited ? clock(Math.max(0, now / 1000 - s.started_at)) : "";
+  // Twitch only autoplays a player Chrome reports as fully visible: nothing on top, no ancestor blur (backdrop-filter), and
+  // no clipping or rounding (the tile's fractional width counts as clipped). So a live player gets the video area to
+  // itself with square corners, its labels go below, and its tile drops `glass`.
+  const embed = !s.source_exited && embedUrl(s.url);
+  const badges = (
+    <span className="flex flex-none items-center gap-1.5">
+      <span className={`${frost} flex items-center gap-[5px] font-semibold`}>
+        <span className={`size-1.5 rounded-full ${s.source_exited ? "bg-mute" : "bg-live"}`} />
+        {s.source_exited ? "ENDED" : "LIVE"}
+      </span>
+      <span className={`${frost} text-dim`}>{sourceLabel(s)}</span>
+    </span>
+  );
+  const alert = tip && (
+    <>
+      <span className="flex size-8 flex-none items-center justify-center rounded-md bg-accent">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0C0E12" strokeWidth="2.2" strokeLinejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+      </span>
+      <span className="flex min-w-0 flex-auto flex-col gap-0.5">
+        <span className="text-sm font-bold">{p.sponsor} tipped <span className="num">{money(tip.suggested_tip_cents)}</span></span>
+        <span className="line-clamp-2 text-xs">{tip.alert_message ?? tip.description}</span>
+      </span>
+      <span className="flex-none self-start rounded border border-white/24 px-[5px] py-0.5 text-[10px] font-semibold text-dim">Paid placement</span>
+    </>
+  );
   return (
     <button
       type="button"
       onClick={p.onSelect}
       aria-label={`Show only ${s.streamer_id} in the feed`}
       aria-pressed={p.selected}
-      className={`tile glass block w-full rounded-[10px] bg-white/5 p-0 text-left text-ink ${state} ${state === "scanning" && !s.source_exited ? "scan" : ""} ${p.selected ? "sel" : ""}`}
+      className={`tile ${embed ? "" : "glass"} block w-full rounded-[10px] bg-white/5 p-0 text-left text-ink ${state} ${state === "scanning" && !s.source_exited ? "scan" : ""} ${p.selected ? "sel" : ""}`}
     >
-      <span className="relative block aspect-video overflow-hidden rounded-t-[9px]" style={{ background: tileBg(hue(s.id)) }}>
-        <StreamMedia s={s} stream={p.stream} poster={detectorUrl(events.find((e) => e.thumbnail_url)?.thumbnail_url)} />
-        <span className="scanline" />
-        <span className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-          <span className={`${frost} flex items-center gap-[5px] font-semibold`}>
-            <span className={`size-1.5 rounded-full ${s.source_exited ? "bg-mute" : "bg-live"}`} />
-            {s.source_exited ? "ENDED" : "LIVE"}
-          </span>
-          <span className={`${frost} text-dim`}>{sourceLabel(s)}</span>
-        </span>
-        <span className={`${frost} num absolute top-2.5 right-2.5 text-dim`}>{p.scout}</span>
-        {tip ? (
-          <span key={tip.event_id} role="status" className="tile-alert glass">
-            <span className="flex size-8 flex-none items-center justify-center rounded-md bg-accent">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0C0E12" strokeWidth="2.2" strokeLinejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
-            </span>
-            <span className="flex min-w-0 flex-auto flex-col gap-0.5">
-              <span className="text-sm font-bold">{p.sponsor} tipped <span className="num">{money(tip.suggested_tip_cents)}</span></span>
-              <span className="line-clamp-2 text-xs">{tip.alert_message ?? tip.description}</span>
-            </span>
-            <span className="flex-none self-start rounded border border-white/24 px-[5px] py-0.5 text-[10px] font-semibold text-dim">Paid placement</span>
-          </span>
+      <span className={`relative block aspect-video ${embed ? "" : "overflow-hidden rounded-t-[9px]"}`} style={{ background: tileBg(hue(s.id)) }}>
+        {embed ? (
+          <iframe src={embed} title={`@${s.streamer_id} on ${sourceLabel(s)}`} allow="autoplay; encrypted-media" tabIndex={-1} className="pointer-events-none absolute inset-0 size-full border-0" />
         ) : (
-          o && <span className={`chip ${state}`}>{chip}</span>
+          <>
+            <StreamMedia s={s} stream={p.stream} poster={detectorUrl(events.find((e) => e.thumbnail_url)?.thumbnail_url)} />
+            <span className="scanline" />
+            <span className="absolute top-2.5 left-2.5">{badges}</span>
+            <span className={`${frost} num absolute top-2.5 right-2.5 text-dim`}>{p.scout}</span>
+            {tip ? (
+              <span key={tip.event_id} role="status" className="tile-alert glass">{alert}</span>
+            ) : (
+              o && <span className={`chip ${state}`}>{chip}</span>
+            )}
+            <span className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-linear-to-b from-[rgba(12,14,18,0)] to-[rgba(12,14,18,0.86)] px-3 pt-7 pb-2.5">
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-semibold">@{s.streamer_id}</span>
+                <span className="num text-xs text-dim">{elapsed}</span>
+              </span>
+              <span className="truncate text-xs text-dim">{s.source_exited ? (s.exit_reason ?? "Source ended") : (s.url ?? "Webcam or shared tab")}</span>
+            </span>
+          </>
         )}
-        <span className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-linear-to-b from-[rgba(12,14,18,0)] to-[rgba(12,14,18,0.86)] px-3 pt-7 pb-2.5">
-          <span className="flex items-baseline justify-between gap-2">
-            <span className="text-sm font-semibold">@{s.streamer_id}</span>
-            <span className="num text-xs text-dim">{now && !s.source_exited ? clock(Math.max(0, now / 1000 - s.started_at)) : ""}</span>
-          </span>
-          <span className="truncate text-xs text-dim">{s.source_exited ? (s.exit_reason ?? "Source ended") : (s.url ?? "Webcam or shared tab")}</span>
-        </span>
       </span>
       <span className="flex flex-col gap-2 px-3 pt-2.5 pb-3">
+        {embed && (
+          <>
+            <span className="flex items-center gap-2">
+              {badges}
+              <span className="min-w-0 truncate text-sm font-semibold">@{s.streamer_id}</span>
+              <span className="num ml-auto flex-none text-xs text-dim">{p.scout} · {elapsed}</span>
+            </span>
+            {tip ? (
+              <span key={tip.event_id} role="status" className="rise flex items-center gap-2.5 rounded-[10px] border border-accent bg-[rgba(19,22,28,0.72)] px-3 py-2.5">{alert}</span>
+            ) : (
+              o && <span className={`chip ${state} static self-start transform-none`}>{chip}</span>
+            )}
+          </>
+        )}
         <span className="flex min-h-2 gap-[3px] overflow-hidden" aria-label="Last 30 analyzed clips">
           {p.chunks.map((c) => <span key={c.chunk_index} className={`clip ${c.status}`} title={c.summary ?? c.status} />)}
         </span>
