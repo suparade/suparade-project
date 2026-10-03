@@ -111,7 +111,7 @@ export default function Settings() {
                   <input id="fund" name="fund" defaultValue="$500.00" className="num" />
                 </div>
                 <button type="button" className="btn-ghost h-10 px-4 text-sm font-semibold">Fund with Link</button>
-                <a href="https://dashboard.stripe.com/test/payments" target="_blank" rel="noopener" className="inline-flex h-10 items-center gap-1.5 text-[13px] font-medium text-dim no-underline">
+                <a href="https://dashboard.stripe.com/acct_1UMRhZ4OXYqp8il9/test/payments" target="_blank" rel="noopener" className="inline-flex h-10 items-center gap-1.5 text-[13px] font-medium text-dim no-underline">
                   Stripe dashboard
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 2.5H2.5v7h7V7" /><path d="M7 2h3v3M10 2L5.5 6.5" /></svg>
                   <span className="sr-only">(opens in a new tab)</span>
