@@ -119,6 +119,7 @@ export function MissionControl({ summary, history, error }: { summary: Summary |
                   events={d.events.filter((e) => e.session_id === s.id)}
                   chunks={d.chunks[s.id] ?? []}
                   stream={d.streams[s.id]}
+                  sponsor={sponsor}
                   selected={filter === s.id}
                   onSelect={() => setFilter(filter === s.id ? null : s.id)}
                 />
@@ -247,10 +248,15 @@ export function StreamMedia({ s, stream, poster }: { s: Session; stream?: MediaS
   return poster ? <img src={poster} alt="" className="absolute inset-0 size-full object-cover" /> : null;
 }
 
-function StreamTile(p: { s: Session; scout: string; now: number; events: TipEvent[]; chunks: Chunk[]; stream?: MediaStream; selected: boolean; onSelect: () => void }) {
+function StreamTile(p: { s: Session; scout: string; now: number; events: TipEvent[]; chunks: Chunk[]; stream?: MediaStream; sponsor: string; selected: boolean; onSelect: () => void }) {
   const { s, now, events } = p;
   const latest = events[0];
   const o = latest && now - at(latest) < 30_000 ? outcome(latest) : null;
+  // detected_at is before the verifier and Stripe, so a 30 s window leaves roughly 15 s on screen after the payment.
+  // The biggest recent tip wins, so a screen-time bonus doesn't hide the tip with the thank-you message.
+  const tip = events
+    .filter((e) => outcome(e) === "paid" && now - at(e) < 30_000)
+    .sort((a, b) => b.suggested_tip_cents - a.suggested_tip_cents)[0];
   const state = !o ? "scanning" : o === "paid" ? "paid" : o === "skip" ? "hold" : "seen";
   const chip = state === "seen" ? `Seen · ${categoryLabel(latest.category)}` : state === "paid" ? `Paid ${money(latest.suggested_tip_cents)}` : "Skipped";
   const last = p.chunks.at(-1)?.status;
@@ -274,7 +280,20 @@ function StreamTile(p: { s: Session; scout: string; now: number; events: TipEven
           <span className={`${frost} text-dim`}>{sourceLabel(s)}</span>
         </span>
         <span className={`${frost} num absolute top-2.5 right-2.5 text-dim`}>{p.scout}</span>
-        {o && <span className={`chip ${state}`}>{chip}</span>}
+        {tip ? (
+          <span key={tip.event_id} role="status" className="tile-alert glass">
+            <span className="flex size-8 flex-none items-center justify-center rounded-md bg-accent">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0C0E12" strokeWidth="2.2" strokeLinejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+            </span>
+            <span className="flex min-w-0 flex-auto flex-col gap-0.5">
+              <span className="text-sm font-bold">{p.sponsor} tipped <span className="num">{money(tip.suggested_tip_cents)}</span></span>
+              <span className="line-clamp-2 text-xs">{tip.alert_message ?? tip.description}</span>
+            </span>
+            <span className="flex-none self-start rounded border border-white/24 px-[5px] py-0.5 text-[10px] font-semibold text-dim">Paid placement</span>
+          </span>
+        ) : (
+          o && <span className={`chip ${state}`}>{chip}</span>
+        )}
         <span className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-linear-to-b from-[rgba(12,14,18,0)] to-[rgba(12,14,18,0.86)] px-3 pt-7 pb-2.5">
           <span className="flex items-baseline justify-between gap-2">
             <span className="text-sm font-semibold">@{s.streamer_id}</span>

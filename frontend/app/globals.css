@@ -104,6 +104,7 @@
   .playing .box { opacity: 0; animation: appear .2s ease forwards; }
   .tipalert { position: absolute; left: 8px; right: 8px; top: 34px; display: none; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 8px; background: rgba(19, 22, 28, .72); border: 1px solid var(--accent); opacity: 0; }
   .playing .tipalert { display: flex; animation: drop .4s cubic-bezier(.2, .8, .2, 1) forwards; }
+  .tile-alert { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); width: min(440px, calc(100% - 20px)); display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: rgba(19, 22, 28, .72); border: 1px solid var(--accent); animation: alert-drop .7s cubic-bezier(.2, .8, .2, 1) both; }
 
   /* Onboarding */
   .pick { border: 1px solid rgba(255, 255, 255, .1); transition: border-color .15s ease, background .15s ease; }
@@ -117,7 +118,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .scan .scanline { animation: none; display: none; }
-    .clip.analyzing, .feed-item, .chip, .box, .rise, .alert-drop { animation: none; }
+    .clip.analyzing, .feed-item, .chip, .box, .rise, .alert-drop, .tile-alert { animation: none; }
     .spin { animation: none; border-color: var(--color-amber); }
     .meter, .tile { transition: none; }
     .playing .track .fill { animation: none; transform: scaleX(1); }
