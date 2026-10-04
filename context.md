@@ -9,7 +9,7 @@ Last updated 2026-10-04. The current state of the whole repo. Product, agents, m
 | `app/` | Payments API (FastAPI): campaigns, creators, detections, tips, Stripe Connect payouts, Link funding webhook, `POST /agent/stream-events` | Vercel under `/api`, or :8001 locally |
 | `supabase/migrations/` | Schema: campaigns, creators, videos, detections, tips, `wallet_ledger`, RLS | Supabase `pvoesovsparqqzosgwki` |
 | `backend/` | Gemini detector (FastAPI, `/api/sessions`, `/ws/events`): ffmpeg 10 s clips, Gemini, tip policy, verifier, chat reaction, alerts | Supabase Compute (`/compute/v1/detector`, see below), or :8000 locally. Needs ffmpeg, runs for hours, sessions live in memory |
-| `frontend/` | Next.js 16 brand portal (replaced the Vite dashboard). Mission control, Videos and `/alert` are live: the detector's WebSocket (`lib/detector.tsx`) plus Supabase reads on the server with the service role key (`lib/supabase.ts`). Onboarding step 4 searches real live streams on Twitch and YouTube (`app/onboarding/streams/route.ts`) and starts a scout per kept stream. Settings and the rest of Onboarding are still sample data | Vercel, or :3000 locally |
+| `frontend/` | Next.js 16 brand portal (replaced the Vite dashboard). Mission control, Videos and `/alert` are live: the detector's WebSocket (`lib/detector.tsx`) plus Supabase reads on the server with the service role key (`lib/supabase.ts`). Onboarding step 2 is the brand agent: Exa research plus a Twitch category check, saved to Supabase `brands.brief` (`app/onboarding/brand/route.ts`). Step 4 searches real live streams on Twitch and YouTube (`app/onboarding/streams/route.ts`) and starts a scout per kept stream. When a live stream ends, the portal keeps it in Supabase `videos` (status `done`), takes it off the dashboard and starts a scout on the next stream the same search finds, in the categories the brand agent saved (`ReplaceEndedStreams` in `lib/detector.tsx`, `app/(app)/actions.ts`). Settings and Onboarding step 3 are still sample data | Vercel, or :3000 locally |
 | `scripts/` | `seed_demo`, `stripe_check`, `run_e2e.sh`, `backfill_transfer_descriptions` | Local |
 | `tests/` | Payments API tests. Detector tests are in `backend/tests/` | Local |
 
@@ -20,7 +20,7 @@ Stream or file → detector (`backend/`) → `POST /agent/stream-events` with `X
 ## Env files
 
 - `.env` (root): one file for all three parts. `run_e2e.sh` sources it, the detector loads it after `backend/.env`, and `frontend/next.config.ts` loads it. Payments API: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `AGENT_API_KEY`, `FRONTEND_URL`, `ALLOW_DEV_FUNDING`, `ALLOW_LIVE_MODE`, `SUPABASE_EXPERIMENTAL_COMPUTE`, `SUPABASE_JWT_KEY` (the public key ID of the project's ES256 signing key; nothing reads it yet).
-- Detector and portal settings in the root `.env`: `GEMINI_API_KEY`, `SUPARADE_API_URL` (`http://localhost:8001`), `SUPARADE_CAMPAIGN_ID` (also the campaign the portal shows), `CORS_ORIGINS` (`http://localhost:3000`), optional `NEXT_PUBLIC_DETECTOR_URL` (default `http://localhost:8000`).
+- Detector and portal settings in the root `.env`: `GEMINI_API_KEY`, `SUPARADE_API_URL` (`http://localhost:8001`), `SUPARADE_CAMPAIGN_ID` (also the campaign the portal shows), `CORS_ORIGINS` (`http://localhost:3000`), optional `NEXT_PUBLIC_DETECTOR_URL` (default `http://localhost:8000`), `EXA_API_KEY` (the portal's brand agent).
 - `backend/.env` (optional): overrides for the detector, every knob is in `backend/.env.example`.
 
 ## Deploy
@@ -58,9 +58,11 @@ Containers next to our Postgres: full Linux, no time limit, public URL or privat
 ## Open items
 
 - Supabase Realtime and RLS in the portal: the publishable key exists (Thomas has it, checked against this project), but it isn't in `.env` anymore since `SUPABASE_ACCESS_TOKEN` now holds the `sbp_` token. Add it as `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Then `/alert` can listen to paid `tips` without the detector, and brands can sign in.
-- Settings and Onboarding steps 1-3 still show sample data; nothing in the backend stores them yet. Step 4's stream search is real.
+- Settings and Onboarding step 3 still show sample data; nothing in the backend stores them yet. Step 2's brand agent and step 4's stream search are real.
+- `EXA_API_KEY` isn't on Vercel yet, so production's brand agent fails and onboarding continues with the sample profile. Once it is, any visitor can spend Exa credit through `/onboarding/brand` (about 2.4¢ a run), like `/detector/sessions`.
 - The onboarding search finds live streams only. Recordings need ffmpeg `-readrate 1` for URL sources in `backend/sources/url_source.py` first (see memory.md).
-- Shared memory and memory-then-Exa pricing for the tipper are not built. The detector still uses fixed `suggested_tip_cents` (Thomas).
+- Shared memory and memory-then-Exa pricing for the tipper are not built. The detector still uses fixed `suggested_tip_cents` (Thomas). The brand agent's market rates are already saved in `brands.brief` (the "Market rate" row).
 - Funding through Checkout and the webhook works end to end locally (2026-10-04: $5 test card payment → `checkout.session.completed` → ledger credit). The Link agent paying that Checkout is still untested. Production has its own webhook endpoint and `whsec_` (see Deploy); the local `.env` holds the `stripe listen` secret. A Checkout payment on production hasn't been tried yet.
+- Ended streams are only replaced while a sidebar page of the portal is open somewhere (see memory.md). Two browsers open at once can both start the same replacement.
 - The portal has no login, so anyone with its URL can start detector sessions (Gemini spend, test tips) through `/detector/sessions`. Gate that route once brands sign in.
 - Thomas's Supabase CLI login and the Supabase MCP can't see `pvoesovsparqqzosgwki`. CLI commands work with `SUPABASE_ACCESS_TOKEN` from `.env` and `--project-ref pvoesovsparqqzosgwki`; the deploy script does this. The MCP still gets "permission denied".

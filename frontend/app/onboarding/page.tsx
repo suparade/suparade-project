@@ -2,48 +2,19 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { BRANDS } from "@/lib/brands";
+import type { Brief } from "./brand/route";
 import type { Found } from "./streams/route";
 
-// ponytail: the brand agent is simulated with timers; swap for a backend call once it exists.
-// The search agent is real (./streams/route.ts). `fits` are Twitch categories.
-const BRANDS = [
-  { id: "gatorade", name: "Gatorade", short: "Gatorade", kind: "Sports drink", color: "#FF7A1A", product: "bottle", fits: ["Fitness & Health", "Sports", "NBA 2K27"],
-    profile: [
-      ["Product", "Sports drink in 20 oz and 28 oz bottles, plus Gatorade Zero and G2."],
-      ["Looks like", "Orange bolt logo and the Gatorade wordmark, coloured drink visible through the bottle."],
-      ["Sounds like", "“Gatorade”, “Gatorade Zero”, “G2”, “the blue one”."],
-      ["Fits with", "Gym, running, team sports, esports and long gaming sessions."],
-      ["Voice", "Short and upbeat. Signs off “Stay hydrated.”"],
-      ["Never pay for", "Competitor bottles in frame (Powerade, Prime, BodyArmor), alcohol, creators under 18."],
-    ] },
-  { id: "northline", name: "Northline Cold Brew", short: "Northline", kind: "Canned cold brew coffee", color: "#C6F432", product: "can", fits: ["Co-working & Studying", "Food & Drink", "Just Chatting"],
-    profile: [
-      ["Product", "Cold brew coffee in a slim 250 ml can, black or oat."],
-      ["Looks like", "Matte black can, lime horizon line, lowercase wordmark."],
-      ["Sounds like", "“Northline”, “the black can”, “my cold brew”."],
-      ["Fits with", "Morning streams, study and work-with-me, cooking."],
-      ["Voice", "Dry and calm. Signs off “Steady on.”"],
-      ["Never pay for", "Other coffee brands in frame, energy drinks, creators under 18."],
-    ] },
-  { id: "fernway", name: "Fernway Sparkling", short: "Fernway", kind: "Sparkling mineral water", color: "#4DA3FF", product: "can", fits: ["Travel & Outdoors", "Food & Drink", "Just Chatting"],
-    profile: [
-      ["Product", "Sparkling mineral water in a 330 ml can, three flavours."],
-      ["Looks like", "Pale blue can, line-drawn fern, FERNWAY in tall capitals."],
-      ["Sounds like", "“Fernway”, “the fern can”, “sparkling water”."],
-      ["Fits with", "Outdoor vlogs, running, cooking, slow chat streams."],
-      ["Voice", "Warm and light. Signs off “Stay fresh.”"],
-      ["Never pay for", "Competitor cans in frame, alcohol mixers, creators under 18."],
-    ] },
-];
+// The brand agent (./brand/route.ts) and the search agent (./streams/route.ts) are real. Step 3 isn't saved yet.
 
 const STEPS = ["Brand", "Understand", "Rules", "Streams"];
 
+// The first two run in parallel, then the categories are checked. The brief is saved with the brand.
 const TASKS = [
-  ["Read the website", "Product range, flavours, brand story"],
-  ["Studied the packaging", "Logo and product shots: shape, colours, wordmark"],
-  ["Read recent posts", "120 posts, for voice and audience"],
-  ["Checked where it already shows up", "31 creator mentions in the last 30 days"],
-  ["Researched market rates", "Exa search: what brands pay creators per mention and per placement. Saved to shared memory"],
+  ["Read what is public about the brand", "Exa search: products, packaging, logo, the names people use for it"],
+  ["Researched market rates", "Exa search: what brands pay streamers per mention and per placement"],
+  ["Matched Twitch categories", "Kept the ones that exist on Twitch, for the stream search"],
 ];
 
 const h1 = "m-0 text-[40px] leading-[1.08] font-bold tracking-[-0.01em] font-stretch-78%";
@@ -60,7 +31,8 @@ function Tick({ size = 16 }: { size?: number }) {
 export default function Onboarding() {
   const [step, setStep] = useState(1);
   const [brandId, setBrandId] = useState("gatorade");
-  const [learnDone, setLearnDone] = useState(0);
+  const [site, setSite] = useState("");
+  const [brief, setBrief] = useState<Brief | { error: string } | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [off, setOff] = useState<Record<string, boolean>>({ water: true, talk: true });
   const [search, setSearch] = useState<{ streams: Found[]; checked: number; failed: string[]; error?: string } | null>(null);
@@ -72,31 +44,47 @@ export default function Onboarding() {
   const goTo = (n: number) => {
     setStep(n);
     setCorrecting(false);
-    setLearnDone(0);
+    if (n === 1) setBrief(null);
     setSearch(null);
     setLaunchErr("");
   };
 
-  const b = BRANDS.find((x) => x.id === brandId)!;
+  // A brand added by name or website starts empty; the brand agent's brief fills it in. If the agent fails, the sample
+  // brands keep their sample profile and categories.
+  const pick = brandId === "new"
+    ? { id: "new", name: site.trim(), short: site.trim(), kind: "", color: undefined, product: "product", fits: [] as string[], profile: [] as string[][] }
+    : BRANDS.find((x) => x.id === brandId)!;
+  const learned = brief && !("error" in brief) ? brief : null;
+  const failed = brief && "error" in brief ? brief.error : "";
+  const b = learned ? { ...pick, ...learned, short: learned.name } : pick;
 
-  // Step 2: the brand agent ticks off one task every 1.3 s. Step 4: the search agent looks for live streams.
+  // Step 2: the brand agent studies the brand (about 6 s). Step 4: the search agent looks for live streams.
+  const studying = step === 2 && brief === null;
+  const studyQ = pick.name;
   useEffect(() => {
-    const ids: ReturnType<typeof setTimeout>[] = [];
-    if (step === 2) for (let k = 1; k <= TASKS.length; k++) ids.push(setTimeout(() => setLearnDone(k), k * 1300));
+    if (!studying) return;
     let live = true;
-    if (step === 4) {
-      const q = new URLSearchParams([["brand", b.short], ...b.fits.map((f) => ["fit", f])]);
-      fetch(`/onboarding/streams?${q}`)
-        .then(async (r) => ({ ...(await r.json()), ...(r.ok ? {} : { streams: [], checked: 0, failed: [] }) }))
-        .catch((e: Error) => ({ streams: [], checked: 0, failed: [], error: e.message }))
-        .then((s) => live && setSearch(s));
-    }
+    fetch("/onboarding/brand", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand: studyQ }) })
+      .then((r) => r.json() as Promise<Brief | { error: string }>)
+      .catch((e: Error) => ({ error: e.message }))
+      .then((x) => live && setBrief(x));
     return () => {
       live = false;
-      ids.forEach(clearTimeout);
     };
-  }, [step, b]);
-  const learned = learnDone >= TASKS.length;
+  }, [studying, studyQ]);
+
+  const streamsQ = new URLSearchParams([["brand", b.short], ...b.fits.map((f) => ["fit", f])]).toString();
+  useEffect(() => {
+    if (step !== 4) return;
+    let live = true;
+    fetch(`/onboarding/streams?${streamsQ}`)
+      .then(async (r) => ({ ...(await r.json()), ...(r.ok ? {} : { streams: [], checked: 0, failed: [] }) }))
+      .catch((e: Error) => ({ streams: [], checked: 0, failed: [], error: e.message }))
+      .then((s) => live && setSearch(s));
+    return () => {
+      live = false;
+    };
+  }, [step, streamsQ]);
   const back = () => goTo(Math.max(1, step - 1));
 
   const moments = [
@@ -176,10 +164,10 @@ export default function Onboarding() {
             </fieldset>
 
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="site" className="text-[13px] text-dim">Or add a new brand by its website</label>
+              <label htmlFor="site" className="text-[13px] text-dim">Or add a new brand by its name or website</label>
               <div className="flex flex-wrap gap-2">
-                <input id="site" name="site" type="url" placeholder="https://yourbrand.com" className="flex-[1_1_260px]" />
-                <button type="button" className="btn-ghost h-10 px-4 text-sm font-semibold">Add brand</button>
+                <input id="site" name="site" value={site} onChange={(e) => setSite(e.target.value)} placeholder="Brand name or https://yourbrand.com" className="flex-[1_1_260px]" />
+                <button type="button" disabled={!site.trim()} onClick={() => { setBrandId("new"); goTo(2); }} className="btn-ghost h-10 px-4 text-sm font-semibold">Add brand</button>
               </div>
             </div>
 
@@ -198,12 +186,12 @@ export default function Onboarding() {
           <>
             <div className="flex flex-col gap-2.5">
               <h1 className={h1}>Getting to know {b.name}</h1>
-              <p className={lead}>The brand agent reads what is public about {b.short} so the scouts know exactly what to look for. This takes about a minute.</p>
+              <p className={lead}>The brand agent reads what is public about {b.short} so the scouts know exactly what to look for. This takes about ten seconds.</p>
             </div>
 
             <ol aria-label="What the brand agent is doing" className="m-0 flex list-none flex-col border-t border-white/8 p-0">
               {TASKS.map(([label, detail], i) => {
-                const state = i < learnDone ? "done" : i === learnDone ? "working" : "waiting";
+                const state = learned ? "done" : failed ? "failed" : i < 2 ? "working" : "waiting";
                 return (
                   <li key={label} className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-3.5 border-b border-white/8 py-3.5">
                     <span aria-hidden="true" className="flex justify-center">
@@ -213,26 +201,33 @@ export default function Onboarding() {
                       <span className={`text-[15px] font-medium ${state === "waiting" ? "text-mute" : ""}`}>{label}</span>
                       <span className="text-[13px] text-mute">{detail}</span>
                     </span>
-                    <span className={`text-xs font-medium ${state === "done" ? "text-accent" : state === "working" ? "text-amber" : "text-mute"}`}>
-                      {state === "done" ? "Done" : state === "working" ? "Working" : "Waiting"}
+                    <span className={`text-xs font-medium ${state === "done" ? "text-accent" : state === "working" ? "text-amber" : state === "failed" ? "text-live" : "text-mute"}`}>
+                      {state === "done" ? "Done" : state === "working" ? "Working" : state === "failed" ? "Failed" : "Waiting"}
                     </span>
                   </li>
                 );
               })}
             </ol>
-            <p role="status" className="sr-only">{learned ? `The brand agent finished studying ${b.name}.` : `${learnDone} of 5 steps done.`}</p>
+            <p role="status" className="sr-only">{learned ? `The brand agent finished studying ${b.name}.` : failed ? "" : `Studying ${b.name}…`}</p>
+            {failed && (
+              <div role="alert" className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-live">
+                <span>The brand agent couldn&apos;t finish: {failed}</span>
+                <button type="button" onClick={() => setBrief(null)} className="btn-ghost h-10 px-4 text-sm font-semibold">Try again</button>
+              </div>
+            )}
 
             {learned && (
               <section aria-label="What the agent understood" className="rise flex flex-col gap-4.5 rounded-[10px] border border-white/8 bg-white/5 p-6">
                 <h2 className="m-0 text-[22px] leading-[1.2] font-semibold">What the agent understood</h2>
                 <dl className="m-0 flex flex-col gap-3">
-                  {b.profile.map(([k, v]) => (
+                  {learned.profile.map(([k, v]) => (
                     <div key={k} className="grid grid-cols-[120px_minmax(0,1fr)] gap-4 text-sm leading-normal">
                       <dt className="text-mute">{k}</dt>
                       <dd className="m-0">{v}</dd>
                     </div>
                   ))}
                 </dl>
+                <p className="m-0 text-[13px] text-mute">From <span className="num">{learned.sources}</span> sources. Saved with {b.short} for the search agent.</p>
                 {correcting && (
                   <div className="flex flex-col gap-1.5 border-t border-white/8 pt-4">
                     <label htmlFor="fix" className="text-[13px] text-dim">What did the agent get wrong?</label>
@@ -246,7 +241,7 @@ export default function Onboarding() {
               <button type="button" onClick={back} className={ghost}>Back</button>
               <div className="flex flex-wrap gap-3">
                 {learned && <button type="button" onClick={() => setCorrecting(!correcting)} aria-expanded={correcting} className={ghost}>Correct something</button>}
-                <button type="button" onClick={() => goTo(3)} disabled={!learned} className={primary}>{learned ? "Looks right, continue" : "Studying…"}</button>
+                <button type="button" onClick={() => goTo(3)} disabled={!brief} className={primary}>{learned ? "Looks right, continue" : failed ? "Continue without it" : "Studying…"}</button>
               </div>
             </div>
           </>

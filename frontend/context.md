@@ -15,8 +15,8 @@ GTM.si is product placement for live streams, paid in real time. A brand's AI ag
 
 | Agent | Job |
 | --- | --- |
-| Brand agent | During onboarding, studies the brand (site, packaging, posts, existing creator mentions) and runs the first Exa market-rate search. Writes all of it to shared memory. |
-| Search agent | Finds streams and videos where the brand already shows up or would fit. Each stream the brand keeps gets a scout. Built 2026-10-04 for live streams only: Twitch streams whose title says the brand or that are live in the brand's categories (`fits` in the onboarding page), plus YouTube live streams whose title says the brand. |
+| Brand agent | During onboarding, studies the brand (site, packaging, posts, existing creator mentions) and runs the first Exa market-rate search. Writes all of it to shared memory. Built 2026-10-04 as two Exa deep-lite searches (what the brand is and looks like on camera; what brands pay streamers) plus a check of its Twitch categories, saved to `brands.brief` in Supabase. The search agent reads the categories there, also when it replaces a stream that ended. |
+| Search agent | Finds streams and videos where the brand already shows up or would fit. Each stream the brand keeps gets a scout. Built 2026-10-04 for live streams only: Twitch streams whose title says the brand or that are live in the brand's categories (`fits` in `lib/brands.ts`), plus YouTube live streams whose title says the brand. When a watched live stream ends, the search runs again and a scout starts on the best stream not already watched; the ended stream leaves the dashboard and stays in Supabase `videos` as history. |
 | Scouts | One per stream. Gemini Flash watches 10 s clips (video and audio) and returns moments as structured JSON. |
 | Verifier | Gemini Pro takes a second, skeptical look at every tip candidate before money moves. |
 | Tipper | Fully autonomous. Decides whether to tip, how much, and the message. Pays from the Link Agent Wallet. |

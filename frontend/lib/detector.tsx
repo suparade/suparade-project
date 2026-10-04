@@ -4,8 +4,11 @@
 // One WebSocket per tab, shared through context. Contract: backend/models.py (BeverageEvent, ChunkStatus).
 // Starting, feeding and stopping sessions goes through app/detector/sessions, which adds DETECTOR_KEY on the server.
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { archiveEnded } from "@/app/(app)/actions";
+import type { Found } from "@/app/onboarding/streams/route";
+import { DETECTOR } from "./detector-url";
 
-export const DETECTOR = (process.env.NEXT_PUBLIC_DETECTOR_URL || "http://localhost:8000").replace(/\/$/, "");
+export { DETECTOR };
 
 /** Evidence, clips and audio are served by the detector under relative paths like /evidence/... */
 export const detectorUrl = (path?: string | null) => (path ? (path.startsWith("http") ? path : DETECTOR + path) : undefined);
@@ -57,6 +60,8 @@ export type Session = {
   demo_alerts: boolean;
   chat_messages: number;
   local_file: boolean;
+  /** The brand the scouts tip for (the detector's SPONSOR_BRAND). */
+  sponsor_brand: string;
 };
 
 export type Chunk = {
@@ -219,6 +224,35 @@ export function DetectorProvider({ children }: { children: React.ReactNode }) {
 
   const list = Object.values(sessions).sort((a, b) => a.started_at - b.started_at);
   return <Ctx value={{ connected, health, events, sessions: list, chunks, chat, streams, start, stop, capture }}>{children}</Ctx>;
+}
+
+/**
+ * When a live stream ends, it leaves the dashboard (Supabase keeps it in videos as history) and the onboarding search
+ * runs again to give its scout a new stream. Mounted on the sidebar pages only: /alert runs in OBS, a browser of its own.
+ * ponytail: tabs of one browser take turns through a Web Lock and archiveEnded skips sessions already gone, but two
+ * browsers can still race and start the same stream twice. Move this into the detector if that starts to matter.
+ */
+export function ReplaceEndedStreams() {
+  const { sessions, start, stop } = useDetector();
+  const seen = useRef(new Set<string>());
+  useEffect(() => {
+    for (const s of sessions) {
+      if (!s.source_exited || seen.current.has(s.id)) continue;
+      seen.current.add(s.id);
+      const replace = async () => {
+        const ended = await archiveEnded(s.id);
+        if (!ended) return;
+        await stop(s.id);
+        const r = await fetch(`/onboarding/streams?${new URLSearchParams([["brand", ended.brand], ...ended.fits.map((f) => ["fit", f])])}`);
+        const { streams = [] }: { streams?: Found[] } = await r.json();
+        const next = streams.find((f) => !ended.watched.includes(f.handle.toLowerCase()));
+        if (next) await start({ source: "url", url: next.url, streamer_id: next.handle });
+      };
+      // navigator.locks is missing outside secure contexts (the portal over plain http on a LAN address).
+      (navigator.locks ? navigator.locks.request("replace-ended-streams", replace) : replace()).catch((e) => console.error("Replacing an ended stream failed", e));
+    }
+  }, [sessions, start, stop]);
+  return null;
 }
 
 /**

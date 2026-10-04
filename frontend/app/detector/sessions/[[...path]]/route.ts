@@ -1,8 +1,8 @@
+import { DETECTOR } from "@/lib/detector-url";
+
 // Starts, feeds and stops detector sessions with DETECTOR_KEY, which stays on the server. Reads, media and the
 // WebSocket go to the detector directly (lib/detector.tsx). Not under /api: on Vercel that path is the payments API.
 // ponytail: no login on the portal yet, so anyone with its URL can start sessions here; gate it once brands sign in.
-// lib/detector.tsx is a client module, so its DETECTOR constant can't be imported here.
-const DETECTOR = (process.env.NEXT_PUBLIC_DETECTOR_URL || "http://localhost:8000").replace(/\/$/, "");
 
 async function forward(req: Request, ctx: RouteContext<"/detector/sessions/[[...path]]">) {
   const { path = [] } = await ctx.params;

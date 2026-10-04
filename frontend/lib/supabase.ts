@@ -3,15 +3,17 @@ import "server-only";
 // Server-side reads from Supabase (PostgREST) with the service role key, for the campaign the detector pays from.
 // The key never reaches the browser: this module only runs in Server Components.
 // ponytail: no login yet, so every visitor sees this campaign. Move to the publishable key + RLS once brands sign in.
+import type { Brief } from "@/app/onboarding/brand/route";
+import { BRANDS } from "./brands";
 import type { TipEvent } from "./detector";
 
-async function rest<T>(path: string, init?: { method: string; body: string }): Promise<T> {
+async function rest<T>(path: string, init?: { method: string; body: string; prefer?: string }): Promise<T> {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the repo root .env");
   const r = await fetch(`${url}/rest/v1/${path}`, {
     ...init,
-    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", Prefer: "return=representation" },
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", Prefer: init?.prefer ?? "return=representation" },
     cache: "no-store",
   });
   if (!r.ok) throw new Error(`Supabase ${r.status} on ${path.split("?")[0]}: ${await r.text()}`);
@@ -134,4 +136,27 @@ export async function creatorsData(): Promise<Creator[]> {
 export async function updateCampaign(fields: { max_tip_cents: number; tipper_instructions: string }) {
   const rows = await rest<unknown[]>(`campaigns?id=eq.${campaignId()}`, { method: "PATCH", body: JSON.stringify(fields) });
   if (!rows.length) throw new Error("Campaign not found in Supabase");
+}
+
+/** A live stream that ended leaves the dashboard but stays in videos as history, keyed by its URL like the payments API's rows. */
+export async function archiveVideo(url: string, handle: string) {
+  await rest("videos?on_conflict=url", {
+    method: "POST",
+    body: JSON.stringify({ url, title: `@${handle}`, status: "done" }),
+    prefer: "resolution=merge-duplicates,return=representation",
+  });
+}
+
+/** What the brand agent learned in onboarding, kept on the brand row with that name (any case), added if missing. */
+export async function saveBrief(brief: Brief) {
+  // ilike treats these as wildcards, so the PATCH could overwrite other brands' briefs.
+  if (/[%_*]/.test(brief.name)) throw new Error(`Can't save a brand named "${brief.name}": it contains %, _ or *`);
+  const rows = await rest<unknown[]>(`brands?name=ilike.${encodeURIComponent(brief.name)}`, { method: "PATCH", body: JSON.stringify({ brief }) });
+  if (!rows.length) await rest("brands", { method: "POST", body: JSON.stringify({ name: brief.name, brief }) });
+}
+
+/** The Twitch categories the search agent looks in for a brand: the brand agent's, else the sample brand's. */
+export async function brandFits(name: string): Promise<string[]> {
+  const rows = await rest<{ brief: Brief }[]>(`brands?select=brief&brief=not.is.null&name=ilike.${encodeURIComponent(name)}&limit=1`);
+  return rows[0]?.brief.fits ?? BRANDS.find((b) => b.short === name)?.fits ?? [];
 }
