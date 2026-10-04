@@ -33,6 +33,7 @@ Stream or file → detector (`backend/`) → `POST /agent/stream-events` with `X
   - `FRONTEND_URL=https://suparade.vercel.app`.
   - `STRIPE_WEBHOOK_SECRET`, from Stripe test webhook endpoint `we_1UMbjo4OXYqp8il9baVRv1bS`, which sends `checkout.session.completed` to `/api/webhooks/stripe`.
   - `NEXT_PUBLIC_DETECTOR_URL` (the Compute detector), `DETECTOR_KEY`.
+  - `EXA_API_KEY` (the brand agent, added 2026-10-04).
 - The portal starts, feeds and stops detector sessions through its own route `/detector/sessions/...`, which adds `DETECTOR_KEY` on the server. It can't live under `/api`, which Vercel sends to the payments API. Reads, media and the WebSocket go straight to the detector.
 - Checked end to end on 2026-10-04: demo stream started from the production portal → Compute detector → production payments API → Stripe transfer `tr_1UMbpl4OXYqp8il9CXG1rTiN` (36¢), then stopped from the portal.
 
@@ -59,7 +60,7 @@ Containers next to our Postgres: full Linux, no time limit, public URL or privat
 
 - Supabase Realtime and RLS in the portal: the publishable key exists (Thomas has it, checked against this project), but it isn't in `.env` anymore since `SUPABASE_ACCESS_TOKEN` now holds the `sbp_` token. Add it as `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Then `/alert` can listen to paid `tips` without the detector, and brands can sign in.
 - Settings and Onboarding step 3 still show sample data; nothing in the backend stores them yet. Step 2's brand agent and step 4's stream search are real.
-- `EXA_API_KEY` isn't on Vercel yet, so production's brand agent fails and onboarding continues with the sample profile. Once it is, any visitor can spend Exa credit through `/onboarding/brand` (about 2.4¢ a run), like `/detector/sessions`.
+- Any visitor can spend Exa credit through `/onboarding/brand` (about 2.4¢ a run), like `/detector/sessions`. Gate both once brands sign in.
 - The onboarding search finds live streams only. Recordings need ffmpeg `-readrate 1` for URL sources in `backend/sources/url_source.py` first (see memory.md).
 - Shared memory and memory-then-Exa pricing for the tipper are not built. The detector still uses fixed `suggested_tip_cents` (Thomas). The brand agent's market rates are already saved in `brands.brief` (the "Market rate" row).
 - Funding through Checkout and the webhook works end to end locally (2026-10-04: $5 test card payment → `checkout.session.completed` → ledger credit). The Link agent paying that Checkout is still untested. Production has its own webhook endpoint and `whsec_` (see Deploy); the local `.env` holds the `stripe listen` secret. A Checkout payment on production hasn't been tried yet.
